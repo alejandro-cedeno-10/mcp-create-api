@@ -1,0 +1,8 @@
+node_modules/
+build/
+.apiary_cache/
+.env
+.DS_Store
+coverage/
+dist/
+*.log

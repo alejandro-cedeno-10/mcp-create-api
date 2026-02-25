@@ -12,7 +12,7 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
+    "skipLibCheck": false,
     "allowSyntheticDefaultImports": true,
     "types": ["node"]
   },

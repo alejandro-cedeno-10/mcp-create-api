@@ -36,7 +36,6 @@ function formatSummaryResponse(summary: any): string {
   
   text += `\n## 🔗 Endpoints (${summary.endpoints.length})\n\n`;
   
-  // Group by method
   const byMethod = summary.endpoints.reduce((acc: any, ep: any) => {
     if (!acc[ep.method]) acc[ep.method] = [];
     acc[ep.method].push(ep);
@@ -86,19 +85,15 @@ export async function handleGetBlueprintSummary(
   const { apiName, includeExamples } = parsedArgs.data;
 
   try {
-    // Try to get from cache first
     let blueprint = await cache.get(apiName);
     
-    // If not in cache or expired, download it
     if (!blueprint || await cache.isExpired(apiName)) {
       blueprint = await client.fetchBlueprint(apiName);
       await cache.set(apiName, blueprint);
     }
 
-    // Generate summary
     const summary = summarizeBlueprint(blueprint, { includeExamples });
     
-    // Format as text
     const summaryText = formatSummaryResponse(summary);
     
     return createSuccessResult(summaryText);

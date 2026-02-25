@@ -5,4 +5,3 @@
 export { handleGetApiaryBlueprint } from "./getBlueprintHandler.js";
 export { handleGetBlueprintSummary } from "./getSummaryHandler.js";
 export { handleListApiaryApis } from "./listApisHandler.js";
-export { handleGenerateApiIntegration } from "./integrationAgentHandler.js";

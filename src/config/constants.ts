@@ -35,8 +35,7 @@ export const TOKEN_CONFIG = {
 export const TOOL_NAMES = {
   GET_BLUEPRINT: "get_apiary_blueprint",
   GET_SUMMARY: "get_apiary_blueprint_summary",
-  LIST_APIS: "list_apiary_apis",
-  GENERATE_INTEGRATION: "generate_api_integration"
+  LIST_APIS: "list_apiary_apis"
 } as const;
 
 /**

@@ -20,8 +20,7 @@ import { createErrorResult } from "./utils/results.js";
 import {
   handleGetApiaryBlueprint,
   handleGetBlueprintSummary,
-  handleListApiaryApis,
-  handleGenerateApiIntegration
+  handleListApiaryApis
 } from "./handlers/index.js";
 
 import type { ApiaryToolClient, DocCacheAdapter } from "./types/index.js";
@@ -66,9 +65,6 @@ export function createApiaryToolHandlers(
 
         case TOOL_NAMES.LIST_APIS:
           return handleListApiaryApis(client);
-
-        case TOOL_NAMES.GENERATE_INTEGRATION:
-          return handleGenerateApiIntegration(rawArguments);
 
         default:
           // This should never happen due to validation above

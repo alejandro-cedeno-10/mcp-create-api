@@ -107,77 +107,12 @@ const listApisTool: Tool = {
 };
 
 /**
- * Tool: Generate API integration code + unit tests (LangGraph Agent)
- *
- * Internally runs a LangGraph ReAct agent that:
- *   1. Fetches the API blueprint (from cache or Apiary)
- *   2. Generates best-practice integration code in the requested language
- *   3. Generates unit tests using the appropriate framework
- *
- * The LLM used is resolved from LLM_PROVIDER env var — defaults to Anthropic
- * (same model Cursor uses), making it feel like the agent "inherits" the LLM.
- */
-const generateApiIntegrationTool: Tool = {
-  name: TOOL_NAMES.GENERATE_INTEGRATION,
-  description:
-    "Generates production-ready API integration code AND unit tests for a given Apiary API. " +
-    "Internally uses a LangGraph agent to fetch the API spec, generate best-practice code, and write tests. " +
-    "Use this tool to: scaffold integration code, generate a client for an API, create unit tests, " +
-    "get a TypeScript/Python/Java/Go/C# client, generate integration starter, build an SDK stub. " +
-    "Supports any language dynamically. Auto-selects the test framework (Jest, pytest, JUnit, etc.) " +
-    "unless you specify one. The LLM inherits the same provider configured in the environment. " +
-    "⚡ Returns: installation steps + typed integration code + unit tests in a single markdown guide. " +
-    "Genera código de integración listo para producción Y tests unitarios para un API de Apiary. " +
-    "Usa un agente LangGraph internamente para obtener el spec, generar código con buenas prácticas y escribir tests. " +
-    "Usa este tool para: generar cliente de un API, scaffoldear integración, crear tests, " +
-    "obtener un cliente TypeScript/Python/Java/Go/C#, generar starter de integración, construir un stub de SDK. " +
-    "Soporta cualquier lenguaje dinámicamente. Auto-selecciona el framework de tests (Jest, pytest, JUnit, etc.) " +
-    "a menos que especifiques uno. El LLM hereda el mismo provider configurado en el entorno. " +
-    "⚡ Retorna: pasos de instalación + código de integración tipado + tests unitarios en una guía markdown.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      apiName: {
-        type: "string",
-        description:
-          "Technical name of the API registered in Apiary (use subdomain from list_apiary_apis) | " +
-          "Nombre técnico del API registrado en Apiary (usa el subdomain de list_apiary_apis)"
-      },
-      language: {
-        type: "string",
-        description:
-          "Programming language for the generated code. Examples: typescript, python, java, go, csharp, php, ruby, kotlin | " +
-          "Lenguaje de programación para el código generado. Ejemplos: typescript, python, java, go, csharp, php, ruby, kotlin"
-      },
-      useCase: {
-        type: "string",
-        description:
-          "Describe what you want to do with the API. Be specific for better results. " +
-          "Example: 'Authenticate and create an invoice with line items, then retrieve its PDF' | " +
-          "Describe qué quieres hacer con el API. Sé específico para mejores resultados. " +
-          "Ejemplo: 'Autenticarme y crear una factura con líneas de detalle, luego obtener su PDF'"
-      },
-      testFramework: {
-        type: "string",
-        description:
-          "Optional: override the test framework. Auto-detected from language if omitted. " +
-          "Examples: Jest, pytest, JUnit 5, xUnit, testify, PHPUnit | " +
-          "Opcional: sobreescribe el framework de tests. Se auto-detecta del lenguaje si se omite. " +
-          "Ejemplos: Jest, pytest, JUnit 5, xUnit, testify, PHPUnit"
-      }
-    },
-    required: ["apiName", "language", "useCase"]
-  }
-};
-
-/**
  * All available tools
  */
 export const tools: Tool[] = [
   getBlueprintTool,
   getBlueprintSummaryTool,
-  listApisTool,
-  generateApiIntegrationTool
+  listApisTool
 ];
 
 /**

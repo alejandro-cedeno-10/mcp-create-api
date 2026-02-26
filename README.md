@@ -44,7 +44,7 @@ docker volume create apiary-cache
 ### Build y run
 
 ```bash
-docker build -t apiary-mcp-server:test .
+docker build -t apiary-mcp-server:latest .
 docker run -i --rm \
   -e APIARY_API_KEY="<TU_KEY>" \
   -v "apiary-cache:/app/.apiary_cache" \
@@ -67,7 +67,7 @@ docker run -i --rm \
         "APIARY_API_KEY=${env:APIARY_API_KEY}",
         "-v",
         "apiary-cache:/app/.apiary_cache",
-        "apiary-mcp-server:test"
+        "apiary-mcp-server:latest"
       ]
     }
   }

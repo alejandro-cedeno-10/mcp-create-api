@@ -41,10 +41,7 @@ RUN npm ci --omit=dev \
 RUN mkdir -p /app/.apiary_cache \
   && chown -R appuser:appuser /app/.apiary_cache
 
-# LLM provider for the integration agent (defaults to anthropic)
-# Pass the matching key via docker run -e or mcp.json env block
-ENV NODE_ENV=production \
-    LLM_PROVIDER=anthropic
+ENV NODE_ENV=production
 
 USER appuser
 

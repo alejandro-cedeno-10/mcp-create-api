@@ -9,10 +9,15 @@ import { createErrorResult, createSuccessResult, buildErrorMessage } from "../ut
 import { summarizeBlueprint } from "../lib/blueprintSummarizer.js";
 
 /**
- * Formats a blueprint summary as a readable text response
+ * Formats a blueprint summary as a readable text response.
+ * @param originalApiName - The technical API name provided by the caller (used for the tip and as title fallback)
  */
-function formatSummaryResponse(summary: any): string {
-  let text = `# ${summary.apiName}\n\n`;
+function formatSummaryResponse(summary: any, originalApiName: string): string {
+  const displayTitle = summary.apiName && summary.apiName !== 'Unknown API'
+    ? summary.apiName
+    : originalApiName;
+
+  let text = `# ${displayTitle}\n\n`;
   
   if (summary.version) {
     text += `**Version:** ${summary.version}\n`;
@@ -36,7 +41,6 @@ function formatSummaryResponse(summary: any): string {
   
   text += `\n## 🔗 Endpoints (${summary.endpoints.length})\n\n`;
   
-  // Group by method
   const byMethod = summary.endpoints.reduce((acc: any, ep: any) => {
     if (!acc[ep.method]) acc[ep.method] = [];
     acc[ep.method].push(ep);
@@ -65,7 +69,7 @@ function formatSummaryResponse(summary: any): string {
     }
   }
   
-  text += `\n---\n💡 **Tip:** Use \`get_apiary_blueprint("${summary.apiName}")\` to get the complete specification.\n`;
+  text += `\n---\n💡 **Tip:** Use \`get_apiary_blueprint("${originalApiName}")\` to get the complete specification.\n`;
   
   return text;
 }
@@ -86,20 +90,16 @@ export async function handleGetBlueprintSummary(
   const { apiName, includeExamples } = parsedArgs.data;
 
   try {
-    // Try to get from cache first
     let blueprint = await cache.get(apiName);
     
-    // If not in cache or expired, download it
     if (!blueprint || await cache.isExpired(apiName)) {
       blueprint = await client.fetchBlueprint(apiName);
       await cache.set(apiName, blueprint);
     }
 
-    // Generate summary
     const summary = summarizeBlueprint(blueprint, { includeExamples });
     
-    // Format as text
-    const summaryText = formatSummaryResponse(summary);
+    const summaryText = formatSummaryResponse(summary, apiName);
     
     return createSuccessResult(summaryText);
   } catch (error) {

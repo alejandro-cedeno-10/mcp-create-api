@@ -1,44 +1,26 @@
 /**
- * Integration Agent — LangGraph StateGraph
+ * Integration Agent — multi-step workflow using MCP sampling
  *
- * Workflow:
- *   START
- *     ↓
- *   fetchApiContext  — loads blueprint from cache or Apiary
- *     ↓
- *   generateCode     — LLM writes best-practice integration code
- *     ↓
- *   generateTests    — LLM writes unit tests for that code
- *     ↓
- *   END
+ * This is the MCP-native equivalent of a LangGraph StateGraph.
+ * Instead of using LangGraph nodes + LLM API keys, each step that
+ * needs text generation calls the MCP client's own LLM via sampling.
  *
- * The LLM used is resolved at runtime from LLM_PROVIDER env var,
- * so it "inherits" whichever model the invoker is already using
- * (e.g. Anthropic Claude when called from Cursor).
+ * Workflow (3 sequential steps, equivalent to 3 LangGraph nodes):
+ *
+ *   Step 1 — fetchApiContext   (no LLM — reads cache/Apiary)
+ *   Step 2 — generateCode      (sampling → client's LLM)
+ *   Step 3 — generateTests     (sampling → client's LLM)
+ *
+ * Why not LangGraph here?
+ *   LangGraph is for building standalone agents that own their LLM.
+ *   Here we ARE a tool being called by an agent (the IDE's LLM).
+ *   MCP Sampling lets us use that same LLM — no API key, no extra deps.
  */
 
-import { StateGraph, START, END, Annotation } from "@langchain/langgraph";
-import { ChatPromptTemplate } from "@langchain/core/prompts";
-import { StringOutputParser } from "@langchain/core/output_parsers";
-import { createLLM } from "./llmFactory.js";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { requestCompletion } from "./sampler.js";
 import { DocCache } from "./cache.js";
 import { ApiaryService } from "./apiary.js";
-
-// ---------------------------------------------------------------------------
-// State definition
-// ---------------------------------------------------------------------------
-
-const IntegrationState = Annotation.Root({
-  apiName: Annotation<string>(),
-  language: Annotation<string>(),
-  useCase: Annotation<string>(),
-  testFramework: Annotation<string>(),
-  apiContext: Annotation<string>({ reducer: (_, y) => y }),
-  generatedCode: Annotation<string>({ reducer: (_, y) => y }),
-  generatedTests: Annotation<string>({ reducer: (_, y) => y }),
-});
-
-type State = typeof IntegrationState.State;
 
 // ---------------------------------------------------------------------------
 // Language → test framework mapping
@@ -63,156 +45,127 @@ const TEST_FRAMEWORK_MAP: Record<string, string> = {
 };
 
 export function resolveTestFramework(language: string, override?: string): string {
-  if (override) return override;
-  return TEST_FRAMEWORK_MAP[language.toLowerCase()] ?? "Jest";
+  return override ?? TEST_FRAMEWORK_MAP[language.toLowerCase()] ?? "Jest";
 }
 
 // ---------------------------------------------------------------------------
-// Nodes
+// Step 1: Load API context (no LLM needed)
 // ---------------------------------------------------------------------------
 
-/**
- * Node 1: Load API context (blueprint) from cache or Apiary.
- * Truncates to 12 000 chars to keep the LLM prompt manageable
- * while still covering all endpoints and models.
- */
-async function fetchApiContext(state: State): Promise<Partial<State>> {
-  let blueprint = await DocCache.get(state.apiName);
+async function fetchApiContext(apiName: string): Promise<string> {
+  let blueprint = await DocCache.get(apiName);
 
-  if (!blueprint || (await DocCache.isExpired(state.apiName))) {
-    blueprint = await ApiaryService.fetchBlueprint(state.apiName);
-    await DocCache.set(state.apiName, blueprint);
+  if (!blueprint || (await DocCache.isExpired(apiName))) {
+    blueprint = await ApiaryService.fetchBlueprint(apiName);
+    await DocCache.set(apiName, blueprint);
   }
 
-  // Keep first 12k chars: usually covers all endpoints and models
-  const apiContext = blueprint.slice(0, 12_000);
-  return { apiContext };
-}
-
-/**
- * Node 2: Generate integration code using the LLM.
- */
-async function generateCode(state: State): Promise<Partial<State>> {
-  const llm = createLLM(0);
-
-  const prompt = ChatPromptTemplate.fromMessages([
-    [
-      "system",
-      `You are a senior software engineer specializing in API integrations.
-Generate production-ready {language} code following these principles:
-- Clean Code (descriptive names, small functions, single responsibility)
-- Best practices and idiomatic {language} patterns
-- Proper error handling with informative messages
-- Async/await patterns
-- If {language} is TypeScript: add full type safety, interfaces/types, no 'any'
-- If {language} is Python: use type hints, dataclasses or Pydantic models
-- If {language} is Java/Kotlin: use proper OOP, immutable DTOs, Optional
-- Include JSDoc/docstrings for public functions
-Return ONLY the code — no markdown fences, no explanation before or after.`,
-    ],
-    [
-      "human",
-      `Generate a {language} client integration for the following API.
-
-## API Name
-{apiName}
-
-## Use Case
-{useCase}
-
-## API Specification (excerpt)
-{apiContext}
-
-## Requirements
-1. HTTP client setup with base URL and authentication headers
-2. Typed request/response models (DTOs / interfaces / dataclasses)
-3. A service class or module with functions for the use case above
-4. Retry logic for transient errors (optional but recommended)
-5. Comprehensive error handling
-
-Return only the code.`,
-    ],
-  ]);
-
-  const chain = prompt.pipe(llm).pipe(new StringOutputParser());
-  const generatedCode = await chain.invoke({
-    language: state.language,
-    apiName: state.apiName,
-    useCase: state.useCase,
-    apiContext: state.apiContext,
-  });
-
-  return { generatedCode };
-}
-
-/**
- * Node 3: Generate unit tests for the code produced in Node 2.
- */
-async function generateTests(state: State): Promise<Partial<State>> {
-  const llm = createLLM(0);
-
-  const prompt = ChatPromptTemplate.fromMessages([
-    [
-      "system",
-      `You are a senior QA engineer expert in {testFramework}.
-Write comprehensive unit tests following these principles:
-- AAA pattern: Arrange → Act → Assert
-- Mock all external HTTP calls / dependencies (no real network calls in unit tests)
-- Descriptive test names: "should <action> when <condition>"
-- Test happy paths AND error/edge cases
-- Aim for high branch coverage
-- Follow {testFramework} conventions and best practices
-Return ONLY the test code — no markdown fences, no explanation.`,
-    ],
-    [
-      "human",
-      `Write {testFramework} unit tests for the following {language} integration code.
-
-## Integration Code
-{generatedCode}
-
-## Requirements
-1. Mock setup: mock the HTTP client / external dependencies
-2. Happy path: successful API calls return expected results
-3. Error paths: network errors, 4xx/5xx responses, invalid payloads
-4. Edge cases: empty responses, null fields, timeouts
-5. At least one integration-style test showing the full flow
-
-Return only the test code.`,
-    ],
-  ]);
-
-  const chain = prompt.pipe(llm).pipe(new StringOutputParser());
-  const generatedTests = await chain.invoke({
-    testFramework: state.testFramework,
-    language: state.language,
-    generatedCode: state.generatedCode,
-  });
-
-  return { generatedTests };
+  return blueprint.slice(0, 12_000);
 }
 
 // ---------------------------------------------------------------------------
-// Graph assembly
+// Step 2: Generate integration code via MCP sampling
 // ---------------------------------------------------------------------------
 
-function buildGraph() {
-  const builder = new StateGraph(IntegrationState);
+async function generateCode(
+  server: Server,
+  params: {
+    apiContext: string;
+    language: string;
+    useCase: string;
+    apiName: string;
+  }
+): Promise<string> {
+  const { language, useCase, apiName, apiContext } = params;
 
-  builder
-    .addNode("fetchApiContext", fetchApiContext)
-    .addNode("generateCode", generateCode)
-    .addNode("generateTests", generateTests)
-    .addEdge(START, "fetchApiContext")
-    .addEdge("fetchApiContext", "generateCode")
-    .addEdge("generateCode", "generateTests")
-    .addEdge("generateTests", END);
-
-  return builder.compile();
+  return requestCompletion(
+    server,
+    [
+      {
+        role: "user",
+        content:
+          `Generate a ${language} integration for the API below.\n\n` +
+          `## Use Case\n${useCase}\n\n` +
+          `## API Name\n${apiName}\n\n` +
+          `## API Specification (excerpt)\n${apiContext}\n\n` +
+          `## Requirements\n` +
+          `1. HTTP client setup with base URL and authentication headers\n` +
+          `2. Typed request/response models (interfaces / dataclasses / DTOs)\n` +
+          `3. A service class or module that implements the use case above\n` +
+          `4. Proper error handling with informative messages\n` +
+          `5. Async/await patterns\n\n` +
+          `Return ONLY the code. No markdown fences, no explanation.`,
+      },
+    ],
+    {
+      systemPrompt:
+        `You are a senior software engineer specializing in API integrations.\n` +
+        `Generate production-ready ${language} code following these principles:\n` +
+        `- Clean Code: descriptive names, small functions, single responsibility\n` +
+        `- Idiomatic ${language} patterns and conventions\n` +
+        `- Full type safety (TypeScript interfaces, Python type hints, Java generics, etc.)\n` +
+        `- Comprehensive error handling\n` +
+        `- JSDoc or language-appropriate docstrings for public APIs\n` +
+        `Return ONLY the code block — no markdown fences, no explanations before or after.`,
+      maxTokens: 4096,
+      temperature: 0,
+      includeContext: "thisServer",
+      intelligencePriority: 0.9,
+      speedPriority: 0.1,
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Step 3: Generate unit tests via MCP sampling
+// ---------------------------------------------------------------------------
+
+async function generateTests(
+  server: Server,
+  params: {
+    code: string;
+    language: string;
+    testFramework: string;
+  }
+): Promise<string> {
+  const { code, language, testFramework } = params;
+
+  return requestCompletion(
+    server,
+    [
+      {
+        role: "user",
+        content:
+          `Write ${testFramework} unit tests for the following ${language} code.\n\n` +
+          `## Code to Test\n${code}\n\n` +
+          `## Requirements\n` +
+          `1. Mock all external HTTP calls — no real network requests in unit tests\n` +
+          `2. Happy path: successful calls return expected results\n` +
+          `3. Error paths: network errors, 4xx/5xx HTTP responses, invalid payloads\n` +
+          `4. Edge cases: empty responses, null/undefined fields, timeouts\n` +
+          `5. Descriptive test names: "should <action> when <condition>"\n\n` +
+          `Return ONLY the test code. No markdown fences, no explanation.`,
+      },
+    ],
+    {
+      systemPrompt:
+        `You are a senior QA engineer expert in ${testFramework}.\n` +
+        `Write comprehensive unit tests following AAA (Arrange, Act, Assert):\n` +
+        `- Mock external dependencies — never make real HTTP calls\n` +
+        `- Aim for high branch and statement coverage\n` +
+        `- Follow ${testFramework} conventions and best practices\n` +
+        `Return ONLY the test code — no markdown fences, no explanations.`,
+      maxTokens: 4096,
+      temperature: 0,
+      includeContext: "none",
+      intelligencePriority: 0.8,
+      speedPriority: 0.2,
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Public interface
 // ---------------------------------------------------------------------------
 
 export interface IntegrationAgentParams {
@@ -231,32 +184,35 @@ export interface IntegrationAgentResult {
 }
 
 /**
- * Runs the LangGraph integration agent.
+ * Runs the 3-step integration agent using MCP sampling.
  *
- * The LLM is resolved from env vars at runtime — set LLM_PROVIDER and the
- * matching API key to "inherit" the model you already use in Cursor.
+ * The LLM is provided by the MCP client (Cursor, OpenCode, Claude Desktop…)
+ * — the server needs no API key and no LangChain dependency.
+ *
+ * @param server  The MCP Server instance (used to send sampling requests)
+ * @param params  What to generate
  */
 export async function runIntegrationAgent(
+  server: Server,
   params: IntegrationAgentParams
 ): Promise<IntegrationAgentResult> {
   const language = params.language.toLowerCase().trim();
   const testFramework = resolveTestFramework(language, params.testFramework);
 
-  const graph = buildGraph();
+  const apiContext = await fetchApiContext(params.apiName);
 
-  const result = await graph.invoke({
-    apiName: params.apiName,
+  const code = await generateCode(server, {
+    apiContext,
     language,
     useCase: params.useCase,
-    testFramework,
-    apiContext: "",
-    generatedCode: "",
-    generatedTests: "",
+    apiName: params.apiName,
   });
 
+  const tests = await generateTests(server, { code, language, testFramework });
+
   return {
-    code: result.generatedCode,
-    tests: result.generatedTests,
+    code,
+    tests,
     language,
     testFramework,
     apiName: params.apiName,

@@ -1,8 +1,11 @@
 /**
  * Blueprint Summarizer
- * 
- * Extrae información esencial de un blueprint completo para reducir tokens
+ *
+ * Extrae información esencial de un blueprint completo para reducir tokens.
+ * Soporta JSON (OpenAPI 3.x), YAML (Swagger 2.0 / OpenAPI 3.x) y API Blueprint (Markdown).
  */
+
+import * as yaml from "js-yaml";
 
 interface EndpointSummary {
   method: string;
@@ -28,22 +31,37 @@ interface BlueprintSummary {
 }
 
 /**
- * Parsea un blueprint OpenAPI/Swagger y extrae información esencial
+ * Parsea un blueprint OpenAPI/Swagger y extrae información esencial.
+ * Orden de detección: JSON → YAML → API Blueprint (Markdown).
  */
 export function summarizeBlueprint(
   blueprint: string,
   options: { includeExamples?: boolean } = {}
 ): BlueprintSummary {
   const { includeExamples = false } = options;
-  
+
+  // 1. Try JSON (OpenAPI 3.x / Swagger 2.0 in JSON)
   try {
-    // Intentar parsear como JSON (OpenAPI/Swagger)
     const spec = JSON.parse(blueprint);
-    return summarizeOpenAPI(spec, includeExamples);
+    if (spec && typeof spec === "object") {
+      return summarizeOpenAPI(spec, includeExamples);
+    }
   } catch {
-    // Si no es JSON, intentar parsear como API Blueprint
-    return summarizeAPIBlueprint(blueprint, includeExamples);
+    // not JSON
   }
+
+  // 2. Try YAML (Swagger 2.0 / OpenAPI 3.x in YAML — common in Apiary)
+  try {
+    const spec = yaml.load(blueprint);
+    if (spec && typeof spec === "object") {
+      return summarizeOpenAPI(spec, includeExamples);
+    }
+  } catch {
+    // not YAML
+  }
+
+  // 3. Fallback: API Blueprint (Markdown-based format)
+  return summarizeAPIBlueprint(blueprint, includeExamples);
 }
 
 /**
@@ -79,14 +97,20 @@ function summarizeOpenAPI(spec: any, includeExamples: boolean): BlueprintSummary
     });
   }
   
+  // Build base URL: OpenAPI 3.x uses `servers[0].url`, Swagger 2.0 uses host + basePath
+  const swaggerBase =
+    spec.host
+      ? `${spec.schemes?.[0] ?? "https"}://${spec.host}${spec.basePath ?? ""}`
+      : undefined;
+
   const summary = {
-    apiName: spec.info?.title || 'Unknown API',
+    apiName: spec.info?.title || "Unknown API",
     version: spec.info?.version,
-    baseUrl: spec.servers?.[0]?.url || spec.host,
+    baseUrl: spec.servers?.[0]?.url ?? swaggerBase,
     endpoints,
     models,
     tokenCount: 0,
-    originalTokenCount: estimateTokenCount(JSON.stringify(spec))
+    originalTokenCount: estimateTokenCount(JSON.stringify(spec)),
   };
   
   const summaryText = formatSummaryAsText(summary, includeExamples);
@@ -102,7 +126,6 @@ function summarizeAPIBlueprint(blueprint: string, includeExamples: boolean): Blu
   const endpoints: EndpointSummary[] = [];
   const models: ModelSummary[] = [];
   
-  // Regex para extraer endpoints (simple parsing)
   const endpointRegex = /##?\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(.+)/gi;
   let match;
   
@@ -113,7 +136,6 @@ function summarizeAPIBlueprint(blueprint: string, includeExamples: boolean): Blu
     });
   }
   
-  // Extraer modelos/schemas
   const schemaRegex = /##?\s+(?:Schema|Model):\s+(.+)/gi;
   while ((match = schemaRegex.exec(blueprint)) !== null) {
     models.push({

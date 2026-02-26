@@ -107,13 +107,166 @@ const listApisTool: Tool = {
 };
 
 /**
- * All available tools
+ * Tool: Generate API integration code + unit tests
+ *
+ * Uses MCP sampling to request text generation from the client's own LLM.
+ * No API key needed — the model is inherited from wherever this MCP server
+ * is invoked (Cursor, OpenCode, Claude Desktop, etc.).
+ *
+ * Workflow:
+ *   1. Fetch API blueprint from cache / Apiary
+ *   2. sampling/createMessage → client's LLM generates code
+ *   3. sampling/createMessage → client's LLM generates tests
  */
-export const tools: Tool[] = [
+const generateApiIntegrationTool: Tool = {
+  name: TOOL_NAMES.GENERATE_INTEGRATION,
+  description:
+    "Generates production-ready API integration code AND unit tests for a given Apiary API. " +
+    "Uses MCP sampling so it inherits your IDE's LLM — no separate API key needed. " +
+    "Use this tool to: scaffold integration code, generate a typed API client, create unit tests, " +
+    "build an SDK stub, generate a starter for any programming language. " +
+    "Supports any language (TypeScript, Python, Java, Go, C#, PHP, Ruby, Kotlin, etc.). " +
+    "Auto-selects the test framework (Jest, pytest, JUnit, xUnit, testify…) unless you override it. " +
+    "Returns a markdown guide with: installation steps + typed code + complete unit tests. " +
+    "Genera código de integración listo para producción Y tests unitarios para un API de Apiary. " +
+    "Usa MCP sampling para heredar el LLM de tu IDE — no necesita API key separada. " +
+    "Usa este tool para: scaffoldear integración, generar cliente tipado, crear tests unitarios, " +
+    "construir un stub de SDK, generar starter en cualquier lenguaje de programación. " +
+    "Soporta cualquier lenguaje. Auto-detecta el framework de tests. " +
+    "Retorna guía markdown con: instalación + código tipado + tests unitarios completos.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      apiName: {
+        type: "string",
+        description:
+          "Technical name of the API in Apiary (use subdomain from list_apiary_apis) | " +
+          "Nombre técnico del API en Apiary (usa el subdomain de list_apiary_apis)",
+      },
+      language: {
+        type: "string",
+        description:
+          "Target programming language. Examples: typescript, python, java, go, csharp, php, ruby, kotlin | " +
+          "Lenguaje de programación destino. Ejemplos: typescript, python, java, go, csharp, php, ruby, kotlin",
+      },
+      useCase: {
+        type: "string",
+        description:
+          "What you want to do with the API — be specific for better results. " +
+          "Example: 'Authenticate with API key and create an invoice with line items' | " +
+          "Qué quieres hacer con el API — sé específico para mejores resultados. " +
+          "Ejemplo: 'Autenticarme con API key y crear una factura con líneas de detalle'",
+      },
+      testFramework: {
+        type: "string",
+        description:
+          "Optional: override the test framework. Auto-detected from language if omitted. " +
+          "Examples: Jest, pytest, JUnit 5, xUnit, testify, PHPUnit | " +
+          "Opcional: sobreescribe el framework de tests. Se auto-detecta del lenguaje. " +
+          "Ejemplos: Jest, pytest, JUnit 5, xUnit, testify, PHPUnit",
+      },
+    },
+    required: ["apiName", "language", "useCase"],
+  },
+};
+
+/**
+ * Tool: Generate API integration plan (fallback when sampling not available)
+ *
+ * Returns a structured plan that the IDE's LLM can execute using MCP prompts.
+ * This works in all MCP clients, even those without sampling support.
+ *
+ * The plan includes:
+ *   1. Fetch blueprint (using get_apiary_blueprint tool)
+ *   2. Generate code (using generate_integration_code prompt)
+ *   3. Generate tests (using generate_integration_tests prompt)
+ */
+const generateApiIntegrationPlanTool: Tool = {
+  name: TOOL_NAMES.GENERATE_INTEGRATION_PLAN,
+  description:
+    "Generates a structured plan for API integration code + unit tests. " +
+    "Returns a JSON plan that your IDE's LLM can execute step-by-step using MCP prompts. " +
+    "Use this when sampling is not available in your MCP client. " +
+    "The plan includes: fetch blueprint → generate code → generate tests. " +
+    "Works in all MCP clients (Cursor, OpenCode, Claude Desktop, etc.). " +
+    "Genera un plan estructurado para código de integración + tests unitarios. " +
+    "Retorna un plan JSON que el LLM de tu IDE puede ejecutar paso a paso usando prompts MCP. " +
+    "Usa esto cuando sampling no está disponible en tu cliente MCP. " +
+    "El plan incluye: obtener blueprint → generar código → generar tests. " +
+    "Funciona en todos los clientes MCP.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      apiName: {
+        type: "string",
+        description:
+          "Technical name of the API in Apiary (use subdomain from list_apiary_apis) | " +
+          "Nombre técnico del API en Apiary (usa el subdomain de list_apiary_apis)",
+      },
+      language: {
+        type: "string",
+        description:
+          "Target programming language. Examples: typescript, python, java, go, csharp, php, ruby, kotlin | " +
+          "Lenguaje de programación destino. Ejemplos: typescript, python, java, go, csharp, php, ruby, kotlin",
+      },
+      useCase: {
+        type: "string",
+        description:
+          "What you want to do with the API — be specific for better results. " +
+          "Example: 'Authenticate with API key and create an invoice with line items' | " +
+          "Qué quieres hacer con el API — sé específico para mejores resultados. " +
+          "Ejemplo: 'Autenticarme con API key y crear una factura con líneas de detalle'",
+      },
+      testFramework: {
+        type: "string",
+        description:
+          "Optional: override the test framework. Auto-detected from language if omitted. " +
+          "Examples: Jest, pytest, JUnit 5, xUnit, testify, PHPUnit | " +
+          "Opcional: sobreescribe el framework de tests. Se auto-detecta del lenguaje. " +
+          "Ejemplos: Jest, pytest, JUnit 5, xUnit, testify, PHPUnit",
+      },
+    },
+    required: ["apiName", "language", "useCase"],
+  },
+};
+
+/**
+ * Base tools (always available)
+ */
+const baseTools: Tool[] = [
   getBlueprintTool,
   getBlueprintSummaryTool,
-  listApisTool
+  listApisTool,
 ];
+
+/**
+ * Sampling-based tool (only shown if sampling is supported)
+ */
+const samplingTool: Tool = generateApiIntegrationTool;
+
+/**
+ * Prompt-based tool (always available, fallback for sampling)
+ */
+const promptBasedTool: Tool = generateApiIntegrationPlanTool;
+
+/**
+ * All available tools (base + prompt-based, sampling tool added conditionally)
+ */
+export const tools: Tool[] = [
+  ...baseTools,
+  promptBasedTool,
+  samplingTool, // Will be filtered out if sampling not supported
+];
+
+/**
+ * Tools that require sampling support
+ */
+export const SAMPLING_REQUIRED_TOOLS = new Set([TOOL_NAMES.GENERATE_INTEGRATION]);
+
+/**
+ * Tools that are fallbacks when sampling is NOT available
+ */
+export const PROMPT_BASED_TOOLS = new Set([TOOL_NAMES.GENERATE_INTEGRATION_PLAN]);
 
 /**
  * Tool lookup by name for validation

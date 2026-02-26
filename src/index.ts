@@ -4,22 +4,32 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
-  ListToolsRequestSchema
+  ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { createApiaryToolHandlers } from "./tools.js";
+import { integrationPrompts } from "./prompts/integrationPrompts.js";
 
 const server = new Server(
   { name: "apiary-context-server", version: "1.0.0" },
   {
     capabilities: {
-      tools: {}
-    }
+      tools: {},
+      sampling: {}, // Declared but may not be supported by client
+      prompts: {}, // Prompts work in all MCP clients
+    },
   }
 );
 
-const handlers = createApiaryToolHandlers();
+const handlers = createApiaryToolHandlers(
+  undefined,
+  undefined,
+  server
+);
 
+// Register tool handlers
 server.setRequestHandler(ListToolsRequestSchema, async (request) =>
   handlers.listTools(request)
 );
@@ -27,6 +37,19 @@ server.setRequestHandler(ListToolsRequestSchema, async (request) =>
 server.setRequestHandler(CallToolRequestSchema, async (request) =>
   handlers.callTool(request)
 );
+
+// Register prompt handlers
+server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  prompts: integrationPrompts,
+}));
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const prompt = integrationPrompts.find((p) => p.name === request.params.name);
+  if (!prompt) {
+    throw new Error(`Prompt "${request.params.name}" not found`);
+  }
+  return { prompt };
+});
 
 const transport = new StdioServerTransport();
 

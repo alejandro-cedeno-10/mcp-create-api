@@ -13,7 +13,7 @@ Servidor Model Context Protocol (MCP) que expone el CLI de Apiary y la API REST 
 
 ```bash
 cp .env.example .env
-edit .env # Añade tu APIARY_API_KEY y valores opcionales
+edit .env
 
 npm install
 npm run build
@@ -38,7 +38,6 @@ La imagen está disponible en GitHub Container Registry (GHCR). No necesitas clo
 |---|---|
 | `latest` | Última versión estable publicada desde `main` |
 | `v2` | Major version 2 — incluye soporte de Alegra Docs |
-| `2.0.0` | Versión exacta (pin a un release específico) |
 
 ### Crear volúmenes de cache (solo la primera vez)
 
@@ -113,16 +112,6 @@ docker run -i --rm \
   apiary-mcp-server:latest
 ```
 
-### Docker Compose
-
-```bash
-cp .env.example .env        # añade APIARY_API_KEY
-docker compose up --build   # primera vez
-docker compose up -d        # posteriores
-docker compose down         # detener
-docker compose down -v      # detener + borrar volúmenes de cache
-```
-
 ---
 
 ## Publicar una nueva versión (mantenedores)
@@ -152,15 +141,6 @@ git push origin v2.0.0
 ```
 
 Tras el push, GitHub Actions construirá y publicará automáticamente los siguientes tags en GHCR:
-
-| Tag Docker generado | Origen |
-|---|---|
-| `ghcr.io/alejandro-cedeno-10/mcp-create-api:2.0.0` | `type=semver,pattern={{version}}` |
-| `ghcr.io/alejandro-cedeno-10/mcp-create-api:2.0` | `type=semver,pattern={{major}}.{{minor}}` |
-| `ghcr.io/alejandro-cedeno-10/mcp-create-api:v2` | `type=semver,pattern=v{{major}}` |
-| `ghcr.io/alejandro-cedeno-10/mcp-create-api:latest` | push a `main` |
-
-> El tag `latest` se actualiza al hacer push a `main`. Los tags de versión (`v2`, `2.0.0`) se generan solo al hacer push del tag de Git.
 
 ### Verificar la imagen publicada
 

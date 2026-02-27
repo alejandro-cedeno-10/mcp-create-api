@@ -12,6 +12,10 @@ Servidor Model Context Protocol (MCP) que expone el CLI de Apiary y la API REST 
 | `generate_api_integration_plan(apiName, language, useCase, testFramework?)` | Genera un plan JSON paso a paso que el LLM del IDE ejecuta para producir código de integración + tests unitarios. Funciona en todos los clientes MCP. | `APIARY_API_KEY` |
 | `generate_api_integration(apiName, language, useCase, testFramework?)` | Genera directamente código de integración listo para producción + tests unitarios usando MCP sampling (hereda el LLM del IDE, sin API key extra). Soporta cualquier lenguaje (TypeScript, Python, Java, Go, C#…). | `APIARY_API_KEY` + cliente MCP con sampling |
 
+Tambien se puede usar el tool `alegra_list_modules()` para listar los modulos de Alegra Docs publica.
+Tambien se puede usar el tool `alegra_list_submodules(moduleName)` para listar los submodulos de un modulo de Alegra Docs publica.
+Tambien se puede usar el tool `alegra_get_endpoint_docs(moduleName, submoduleName, operationName)` para obtener la documentacion de un endpoint de Alegra Docs publica.
+
 La carga de variables `.env` es automática en tiempo de ejecución (gracias a `dotenv`). El servidor crea `.apiary_cache/` en el directorio del proyecto para guardar los contratos y reutilizarlos durante 24h; puedes borrar la carpeta cuando quieras reiniciar el cache.
 
 El servidor dialoga por STDIO y normalmente se ejecuta como subproceso de la herramienta MCP.
@@ -27,28 +31,30 @@ docker volume create alegra-cache
 
 ### 2. Usar la imagen publicada (recomendado)
 
-No necesitas clonar el repo ni hacer build. La imagen está en GitHub Container Registry (GHCR):
+La imagen está en GitHub Container Registry (GHCR):
 
 ```bash
+docker run -i --rm \
+  -e APIARY_API_KEY="<TU_KEY>" \
+  -v "apiary-cache:/app/.apiary_cache" \
+  -v "alegra-cache:/app/.alegra_cache" \
+  ghcr.io/alejandro-cedeno-10/mcp-create-api:latest
+```
+
+Tags disponibles: `v2` o `latest`
+
+V2 es la version actual  que soporta Alegra Docs publica.
+Latest es la version actual que soporta solo documentacion en apiary.
+
+### 3. Build local (solo para desarrollo)
+
+```bash
+
 docker run -i --rm \
   -e APIARY_API_KEY="<TU_KEY>" \
   -v "apiary-cache:/app/.apiary_cache" \
   -v "alegra-cache:/app/.alegra_cache" \
   ghcr.io/alejandro-cedeno-10/mcp-create-api:v2
-```
-
-Tags disponibles: `v2` · `2.0.0` · `2.0` · `latest`
-
-### 3. Build local (solo para desarrollo)
-
-```bash
-docker build -t apiary-mcp-server:latest .
-
-docker run -i --rm \
-  -e APIARY_API_KEY="<TU_KEY>" \
-  -v "apiary-cache:/app/.apiary_cache" \
-  -v "alegra-cache:/app/.alegra_cache" \
-  apiary-mcp-server:latest
 ```
 
 ---
@@ -79,7 +85,6 @@ docker run -i --rm \
 }
 ```
 
-> Usa `:v2` para fijar la versión major, `:2.0.0` para pin exacto, o `:latest` para siempre recibir la última versión desde `main`. Ver la guía completa en [`docs/README.md`](docs/README.md).
 
 ### Reinicia completamente.
 

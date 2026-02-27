@@ -38,6 +38,19 @@ export const TOOL_NAMES = {
   LIST_APIS: "list_apiary_apis",
   GENERATE_INTEGRATION: "generate_api_integration",
   GENERATE_INTEGRATION_PLAN: "generate_api_integration_plan",
+  // Alegra public docs tools
+  ALEGRA_LIST_MODULES: "alegra_list_modules",
+  ALEGRA_LIST_SUBMODULES: "alegra_list_submodules",
+  ALEGRA_GET_ENDPOINT_DOCS: "alegra_get_endpoint_docs",
+} as const;
+
+/**
+ * Alegra public documentation configuration
+ */
+export const ALEGRA_DOCS_CONFIG = {
+  BASE_URL: "https://developer.alegra.com",
+  TTL_DAYS: 5,
+  CACHE_DIRECTORY: ".alegra_cache",
 } as const;
 
 /**

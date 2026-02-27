@@ -4,7 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { ApiaryError } from "../src/lib/apiary";
 import {
   ApiaryToolHandlers,
-  DocCacheAdapter,
+  type DocCacheAdapter,
   createApiaryToolHandlers
 } from "../src/tools";
 
@@ -48,11 +48,17 @@ describe("createApiaryToolHandlers", () => {
 
     const response = await handlers.listTools(request);
 
-    expect(response.tools).toHaveLength(2);
-    expect(response.tools.map((tool) => tool.name)).toEqual([
-      "get_apiary_blueprint",
-      "list_apiary_apis"
-    ]);
+    // No server passed → sampling tool (generate_api_integration) is hidden,
+    // plan-based fallback (generate_api_integration_plan) is shown instead.
+    const names = response.tools.map((tool) => tool.name);
+    expect(names).toContain("get_apiary_blueprint");
+    expect(names).toContain("get_apiary_blueprint_summary");
+    expect(names).toContain("list_apiary_apis");
+    expect(names).toContain("generate_api_integration_plan");
+    expect(names).toContain("alegra_list_modules");
+    expect(names).toContain("alegra_list_submodules");
+    expect(names).toContain("alegra_get_endpoint_docs");
+    expect(names).not.toContain("generate_api_integration"); // requires sampling
   });
 
   it("fetches blueprint and caches it when refresh is required", async () => {

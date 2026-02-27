@@ -1,6 +1,7 @@
 node_modules/
 build/
 .apiary_cache/
+.alegra_cache/
 .env
 .DS_Store
 coverage/

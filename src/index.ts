@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { warmUpEmbedder } from "./lib/alegraEmbedder.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -52,6 +53,10 @@ server.setRequestHandler(GetPromptRequestSchema, async (request) => {
 });
 
 const transport = new StdioServerTransport();
+
+// Start loading the local embedding model in the background.
+// By the time the user makes a real query, the model will likely be ready.
+warmUpEmbedder();
 
 try {
   await server.connect(transport);

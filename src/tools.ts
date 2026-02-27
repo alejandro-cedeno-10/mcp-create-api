@@ -31,6 +31,9 @@ import {
   handleListApiaryApis,
   handleGenerateApiIntegration,
   handleGenerateIntegrationPlan,
+  handleAlegraListModules,
+  handleAlegraListSubmodules,
+  handleAlegraGetEndpointDocs,
 } from "./handlers/index.js";
 
 import type { ApiaryToolClient, DocCacheAdapter } from "./types/index.js";
@@ -169,6 +172,15 @@ export function createApiaryToolHandlers(
 
         case TOOL_NAMES.GENERATE_INTEGRATION_PLAN:
           return handleGenerateIntegrationPlan(rawArguments);
+
+        case TOOL_NAMES.ALEGRA_LIST_MODULES:
+          return handleAlegraListModules(rawArguments);
+
+        case TOOL_NAMES.ALEGRA_LIST_SUBMODULES:
+          return handleAlegraListSubmodules(rawArguments);
+
+        case TOOL_NAMES.ALEGRA_GET_ENDPOINT_DOCS:
+          return handleAlegraGetEndpointDocs(rawArguments);
 
         default:
           return createErrorResult(`Unhandled tool: "${name}"`);

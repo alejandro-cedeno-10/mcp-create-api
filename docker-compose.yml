@@ -1,0 +1,94 @@
+# =============================================================================
+# Apiary MCP Server — Docker Compose
+# =============================================================================
+#
+# Uso:
+#   docker compose up --build        # primera vez / rebuild
+#   docker compose up -d             # background (después del primer build)
+#   docker compose down              # para el contenedor
+#   docker compose down -v           # para + borra los volúmenes de cache
+#
+# Volúmenes persistentes:
+#   apiary_cache   → blueprints de Apiary (archivos .apib / JSON, TTL 24h)
+#   alegra_cache   → docs.db SQLite de Alegra (índice + secciones FTS5, TTL 5d)
+#
+# Variables de entorno:
+#   APIARY_API_KEY  → requerida para las tools de Apiary (get_apiary_blueprint, etc.)
+#                     Crea un archivo .env con: APIARY_API_KEY=tu_key_aqui
+#
+# El MCP server corre en modo stdio — no expone ningún puerto HTTP.
+# Para usarlo con Cursor/Claude Desktop, conecta via stdio.
+# =============================================================================
+
+services:
+  apiary-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # linux/amd64: better-sqlite3 + apiaryio gem tienen código nativo
+      # En Mac M-series funciona vía Rosetta 2 / Docker Desktop
+      platforms:
+        - linux/amd64
+    image: apiary-mcp-server:latest
+    container_name: apiary-mcp-server
+
+    # Variables de entorno — crea un archivo .env en la raíz del proyecto:
+    #   APIARY_API_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    env_file:
+      - path: .env
+        required: false   # no falla si no existe .env
+
+    environment:
+      NODE_ENV: production
+      # Sobreescribe variables individuales si no usas .env:
+      # APIARY_API_KEY: ${APIARY_API_KEY}
+
+    # -------------------------------------------------------------------------
+    # Volúmenes de cache
+    # -------------------------------------------------------------------------
+    volumes:
+      # Blueprints de Apiary — TTL 24h, ~1-50 MB por blueprint
+      - apiary_cache:/app/.apiary_cache
+
+      # Alegra docs SQLite DB — TTL 5 días, ~5-20 MB
+      # Contiene: índice JSON de módulos/submodulos + docs.db con secciones FTS5
+      - alegra_cache:/app/.alegra_cache
+
+    # El MCP server usa stdio — no necesita puertos
+    # stdin_open + tty permiten conectar al proceso stdio desde el host
+    stdin_open: true
+    tty: false
+
+    # Reinicia automáticamente si el proceso falla (no en stop manual)
+    restart: unless-stopped
+
+    # Límites de recursos (ajustar según necesidad)
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
+    # Health check: verifica que el proceso Node.js sigue corriendo
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+# =============================================================================
+# Volúmenes nombrados — persisten entre `docker compose down` + `up`
+# Para borrar: docker compose down -v  (o: docker volume rm <nombre>)
+# =============================================================================
+volumes:
+  apiary_cache:
+    driver: local
+    labels:
+      com.apiary-mcp.description: "Apiary blueprint cache (TTL 24h)"
+
+  alegra_cache:
+    driver: local
+    labels:
+      com.apiary-mcp.description: "Alegra docs SQLite DB + index (TTL 5d)"

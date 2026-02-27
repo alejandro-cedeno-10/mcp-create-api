@@ -18,25 +18,45 @@ El servidor dialoga por STDIO y normalmente se ejecuta como subproceso de la her
 
 ## Docker
 
-### Crear volumen nombrado (recomendado) para cache
+### 1. Crear volúmenes nombrados para cache (solo la primera vez)
 
 ```bash
-docker volume create apiary-cache
+docker volume create apiary-cache 
+docker volume create alegra-cache
 ```
 
-### Build y run
+### 2. Usar la imagen publicada (recomendado)
+
+No necesitas clonar el repo ni hacer build. La imagen está en GitHub Container Registry (GHCR):
 
 ```bash
-docker build -t ghcr.io/alejandro-cedeno-10/mcp-create-api:latest .
 docker run -i --rm \
   -e APIARY_API_KEY="<TU_KEY>" \
   -v "apiary-cache:/app/.apiary_cache" \
-  ghcr.io/alejandro-cedeno-10/mcp-create-api:latest
+  -v "alegra-cache:/app/.alegra_cache" \
+  ghcr.io/alejandro-cedeno-10/mcp-create-api:v2
 ```
+
+Tags disponibles: `v2` · `2.0.0` · `2.0` · `latest`
+
+### 3. Build local (solo para desarrollo)
+
+```bash
+docker build -t apiary-mcp-server:latest .
+
+docker run -i --rm \
+  -e APIARY_API_KEY="<TU_KEY>" \
+  -v "apiary-cache:/app/.apiary_cache" \
+  -v "alegra-cache:/app/.alegra_cache" \
+  apiary-mcp-server:latest
+```
+
+---
 
 ## Integración del mcp
 
 ### Edita tu archivo `mcp.json`:
+
 ```json
 {
   "mcpServers": {
@@ -50,11 +70,26 @@ docker run -i --rm \
         "APIARY_API_KEY=${env:APIARY_API_KEY}",
         "-v",
         "apiary-cache:/app/.apiary_cache",
-        "ghcr.io/alejandro-cedeno-10/mcp-create-api:latest"
+        "-v",
+        "alegra-cache:/app/.alegra_cache",
+        "ghcr.io/alejandro-cedeno-10/mcp-create-api:v2"
       ]
     }
   }
 }
 ```
 
+> Usa `:v2` para fijar la versión major, `:2.0.0` para pin exacto, o `:latest` para siempre recibir la última versión desde `main`. Ver la guía completa en [`docs/README.md`](docs/README.md).
+
 ### Reinicia completamente.
+
+## Prácticas de ingeniería aplicadas
+
+| Práctica | Descripción |
+|---|---|
+| **Tool Caching (TTL 24 h)** | Los blueprints se guardan en disco y se reutilizan durante 24 h. Evita llamadas repetidas a Apiary y permite trabajar offline. |
+| **MCP Sampling** | El servidor no necesita una API key de LLM propia. Envía `sampling/createMessage` al cliente y este responde con su modelo. SOLO para clientes MCP que implementen sampling/createMessage. |
+| **Prompt Chaining** | El flujo de generación es un agente de 3 pasos secuenciales: (1) cargar el blueprint, (2) generar el código, (3) generar los tests usando el código del paso anterior como contexto. El output de cada paso es el input del siguiente. |
+| **MCP Prompts (templates)** | Dos prompts MCP formales registrados en el servidor — `generate_integration_code` y `generate_integration_tests` — con system prompt, user prompt y placeholders tipados. El llm del IDE puede invocarlos directamente sin sampling. |
+| **Graceful Degradation (3 niveles)** | Si sampling falla, el servidor intenta un segundo camino; si vuelve a fallar, devuelve el plan JSON para que el llm del IDE ejecute él mismo. Ningún cliente se queda sin respuesta. |
+| **Token Optimization** | El resumen compacto del blueprint extrae solo lo relevante (~90% menos tokens), ideal para la fase de exploración antes de bajar la spec completa. |

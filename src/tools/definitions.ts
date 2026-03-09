@@ -88,6 +88,51 @@ const getBlueprintSummaryTool: Tool = {
 };
 
 /**
+ * Tool: Get blueprint overview from index (reuse chunked/embedded data)
+ *
+ * After you have brought the full blueprint (or used search), this returns a summary
+ * built from the same indexed sections — so we embed and use what we previously brought.
+ */
+const getBlueprintOverviewTool: Tool = {
+  name: TOOL_NAMES.GET_OVERVIEW,
+  description:
+    "Gets a summary of an API blueprint from the indexed sections (chunked and optionally embedded). " +
+    "Use after get_apiary_blueprint or search_apiary_blueprint: reuses the same index, so you get an overview " +
+    "without re-parsing the full spec. Saves tokens by returning only the first N sections up to maxTokens. " +
+    "Use this to: get an overview when you already have the full blueprint cached/indexed, " +
+    "see endpoints and schemas in order without fetching again. " +
+    "Obtiene un resumen del blueprint desde las secciones indexadas (chunked y opcionalmente embebidas). " +
+    "Usa después de get_apiary_blueprint o search_apiary_blueprint: reutiliza el mismo índice. " +
+    "Resumen sin re-parsear el spec completo; control con maxSections y maxTokens.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      apiName: {
+        type: "string",
+        description:
+          "API name (subdomain from list_apiary_apis) | Nombre del API (subdomain de list_apiary_apis)"
+      },
+      maxSections: {
+        type: "number",
+        description:
+          "Max sections to include (1–20, default 10) | Máximo de secciones (1–20, default 10)"
+      },
+      maxTokens: {
+        type: "number",
+        description:
+          "Cap total response tokens (400–4000, default 2000) | Límite de tokens (400–4000, default 2000)"
+      },
+      forceRefresh: {
+        type: "boolean",
+        description:
+          "Re-fetch blueprint and re-index | Re-fetch y re-indexar"
+      },
+    },
+    required: ["apiName"],
+  },
+};
+
+/**
  * Tool: List all available APIs
  * 
  * Lists all APIs in the Apiary account.
@@ -231,164 +276,29 @@ const generateApiIntegrationPlanTool: Tool = {
 };
 
 // ---------------------------------------------------------------------------
-// Alegra public API documentation tools
+// Apiary blueprint RAG — token-efficient search over CLI blueprint
 // ---------------------------------------------------------------------------
 
-/**
- * Tool: List Alegra API modules (Layer 1 of cascading docs fetch)
- */
-const alegraListModulesTool: Tool = {
-  name: TOOL_NAMES.ALEGRA_LIST_MODULES,
+const searchBlueprintTool: Tool = {
+  name: TOOL_NAMES.SEARCH_BLUEPRINT,
   description:
-    "Lists all top-level modules available in the Alegra public API documentation (developer.alegra.com). " +
-    "This is Layer 1 of the cascading docs pattern: list modules → list submodules → get endpoint details. " +
-    "Use this tool to: see what sections the Alegra API docs have, get an overview of available API categories, " +
-    "discover modules like Ingresos, Gastos, Inventario, Contactos, Bancos, etc. " +
-    "Results are cached for 5 days. Use forceRefresh=true to get the latest version. " +
-    "Lista todos los módulos principales de la documentación pública de Alegra API (developer.alegra.com). " +
-    "Este es el Nivel 1 del patrón cascada: listar módulos → listar submodulos → obtener detalles del endpoint. " +
-    "Úsalo para: ver qué secciones tiene la API de Alegra, descubrir módulos como Ingresos, Gastos, Inventario, etc. " +
-    "El resultado se cachea por 5 días. Usa forceRefresh=true para obtener la versión más reciente.",
+    "Searches an Apiary API blueprint by keywords and returns only the most relevant sections (RAG). " +
+    "Saves tokens: instead of loading the full 50k+ token blueprint, returns 3–5 chunked sections. " +
+    "Use this to: find endpoints by method/path, find schemas, get auth or error docs. " +
+    "If query is omitted, returns the first few sections (overview). " +
+    "Blueprint is indexed on first use (structure-aware chunking + SQLite FTS5). " +
+    "Busca en un blueprint de Apiary por palabras clave y devuelve solo las secciones relevantes (RAG). " +
+    "Ahorra tokens: en lugar del blueprint completo devuelve 3–5 secciones. " +
+    "Sin query devuelve las primeras secciones (overview).",
   inputSchema: {
     type: "object",
     properties: {
-      forceRefresh: {
-        type: "boolean",
-        description:
-          "Force re-fetch from developer.alegra.com, ignoring the 5-day cache. " +
-          "Use true when the user mentions: force, latest, refresh, más reciente, forzar, actualizar. | " +
-          "Forzar recarga desde developer.alegra.com ignorando el cache de 5 días.",
-      },
+      apiName: { type: "string", description: "API name (subdomain from list_apiary_apis)" },
+      query: { type: "string", description: "Optional keywords (e.g. 'POST invoice', 'schema', 'auth')" },
+      maxSections: { type: "number", description: "Max sections to return (1–15, default 5)" },
+      forceRefresh: { type: "boolean", description: "Re-fetch blueprint and re-index" },
     },
-  },
-};
-
-/**
- * Tool: List submodules of an Alegra API module (Layer 2)
- */
-const alegraListSubmodulesTool: Tool = {
-  name: TOOL_NAMES.ALEGRA_LIST_SUBMODULES,
-  description:
-    "Lists all submodules (individual endpoint pages) within a specific Alegra API module. " +
-    "This is Layer 2 of the cascading docs pattern: after listing modules, call this to see " +
-    "what endpoints/pages a module contains, along with their URLs. " +
-    "Use this tool to: drill into a specific module (e.g. 'Ingresos'), see its endpoints list, " +
-    "discover URLs for Facturas de venta, Pagos, Notas Crédito, etc. " +
-    "Module name is fuzzy-matched (e.g. 'ingresos', 'Ingresos', 'INGRESOS' all work). " +
-    "Lista todos los submodulos (páginas de endpoints) de un módulo específico de Alegra API. " +
-    "Este es el Nivel 2 del patrón cascada: después de listar módulos, usa esto para ver " +
-    "qué endpoints contiene un módulo con sus URLs. " +
-    "El nombre del módulo acepta coincidencia flexible (ej: 'ingresos', 'Ingresos' funcionan igual).",
-  inputSchema: {
-    type: "object",
-    properties: {
-      module: {
-        type: "string",
-        description:
-          "Name of the Alegra API module to list submodules for. " +
-          "Examples: 'Ingresos', 'Gastos', 'Inventario', 'Contactos', 'Bancos', 'Configuraciones'. " +
-          "Fuzzy-matched — partial names work. | " +
-          "Nombre del módulo de Alegra API. Ejemplos: 'Ingresos', 'Gastos', 'Inventario'. " +
-          "Acepta coincidencia parcial.",
-      },
-      forceRefresh: {
-        type: "boolean",
-        description:
-          "Force re-fetch of the documentation index. | Forzar recarga del índice.",
-      },
-    },
-    required: ["module"],
-  },
-};
-
-/**
- * Tool: Get Alegra API docs — 4-layer cascading fetch with SQLite + FTS5
- *
- * Real ReadMe.io doc structure for Alegra API:
- *   Module → Submodule (container page) → Operation (individual endpoint) → Sections
- *
- * Smart auto-routing:
- *   - module + submodule only        → fetches submodule page, detects sidebar operations
- *                                      (rm-Sidebar-list / subpages CSS class)
- *                                      If operations exist → returns operation list
- *                                      If leaf page       → returns chunked sections
- *   - module + submodule + operation → fetches that specific operation page (GET/POST/PUT/DELETE)
- *   - any call with query            → SQLite FTS5 search within stored sections
- */
-const alegraGetEndpointDocsTool: Tool = {
-  name: TOOL_NAMES.ALEGRA_GET_ENDPOINT_DOCS,
-  description:
-    "Fetches Alegra API documentation with 4-layer cascading: Module → Submodule → Operation → Sections. " +
-    "Content is stored in local SQLite (.alegra_cache/docs.db), chunked by H2/H3 sections. " +
-    "Returns ONLY the most relevant sections, NOT the full page, to minimise token usage. " +
-    "SMART AUTO-ROUTING: " +
-    "  (1) module + submodule → detects sidebar operations (rm-Sidebar-list) automatically. " +
-    "      If the page has sub-operations (Crear, Listar, Editar, etc.) → returns operation list. " +
-    "      If it's a leaf page → returns first 4 sections (~400–800 tokens). " +
-    "  (2) module + submodule + operation → fetches that specific HTTP endpoint page. " +
-    "      Example: operation='Crear factura de proveedor' → GET/POST details, params, body, response. " +
-    "  (3) Add query= for FTS5 keyword search within sections (top 3 results, ~200–500 tokens). " +
-    "⚠️ Only call this when you know the module AND submodule. Use alegra_list_modules first if unsure. " +
-    "Pages indexed for 5 days. forceRefresh=true to re-index. " +
-    "Obtiene documentación de Alegra API con cascada de 4 niveles: Módulo → Submodulo → Operación → Secciones. " +
-    "Almacenado en SQLite local (.alegra_cache/docs.db), dividido en secciones por H2/H3. " +
-    "ENRUTAMIENTO AUTOMÁTICO: " +
-    "  (1) module + submodule → detecta operaciones del sidebar (rm-Sidebar-list) automáticamente. " +
-    "      Si la página tiene operaciones (Crear, Listar, etc.) → devuelve lista de operaciones. " +
-    "      Si es página hoja → devuelve primeras 4 secciones. " +
-    "  (2) module + submodule + operation → página del endpoint HTTP específico con params y ejemplos. " +
-    "  (3) Agrega query= para búsqueda FTS5 dentro de las secciones (top 3, ~200–500 tokens). " +
-    "⚠️ Úsalo solo cuando sepas módulo Y submodulo. Las páginas se indexan 5 días.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      module: {
-        type: "string",
-        description:
-          "Name of the Alegra API module. Examples: 'Ingresos', 'Gastos', 'Inventario'. " +
-          "Fuzzy-matched. | Nombre del módulo. Acepta coincidencia parcial.",
-      },
-      submodule: {
-        type: "string",
-        description:
-          "Name of the submodule/section page. " +
-          "Examples: 'Facturas de proveedor', 'Facturas de venta', 'Pagos', 'Ítems'. " +
-          "Fuzzy-matched — partial names work. | " +
-          "Nombre del submodulo. Ejemplos: 'Facturas de proveedor', 'Pagos', 'Ítems'. " +
-          "Acepta coincidencia parcial.",
-      },
-      operation: {
-        type: "string",
-        description:
-          "Optional: specific operation within the submodule (Level 4). " +
-          "These are the links in the ReadMe.io left sidebar (rm-Sidebar-list / subpages class). " +
-          "Examples: 'Crear factura de proveedor', 'Listar facturas', 'Obtener factura', 'Eliminar'. " +
-          "First call WITHOUT operation to discover available operations. " +
-          "Then call WITH operation to get the specific HTTP endpoint docs. " +
-          "Fuzzy-matched — partial names work. | " +
-          "Operación específica dentro del submodulo (los links del sidebar de ReadMe.io). " +
-          "Ejemplos: 'Crear factura de proveedor', 'Listar', 'Obtener', 'Editar', 'Eliminar'. " +
-          "Primera llamada SIN operation para descubrir operaciones disponibles, " +
-          "luego CON operation para obtener el endpoint HTTP específico.",
-      },
-      query: {
-        type: "string",
-        description:
-          "Optional FTS5 keyword search within the page sections (SQLite full-text search). " +
-          "Returns top 3 most relevant sections (~200–500 tokens). " +
-          "Examples: 'response', 'parámetros', 'body', 'ejemplo', 'error', 'autenticación'. " +
-          "Omit to get the first 4 sections (overview). | " +
-          "Búsqueda FTS5 dentro de secciones. Ejemplos: 'response', 'parámetros', 'error'.",
-      },
-      forceRefresh: {
-        type: "boolean",
-        description:
-          "Force re-fetch and re-index, bypassing 5-day cache. " +
-          "Use when user says: force, latest, refresh, más reciente, forzar, actualizar. | " +
-          "Forzar recarga ignorando cache de 5 días.",
-      },
-    },
-    required: ["module", "submodule"],
+    required: ["apiName"],
   },
 };
 
@@ -398,10 +308,9 @@ const alegraGetEndpointDocsTool: Tool = {
 const baseTools: Tool[] = [
   getBlueprintTool,
   getBlueprintSummaryTool,
+  getBlueprintOverviewTool,
+  searchBlueprintTool,
   listApisTool,
-  alegraListModulesTool,
-  alegraListSubmodulesTool,
-  alegraGetEndpointDocsTool,
 ];
 
 /**

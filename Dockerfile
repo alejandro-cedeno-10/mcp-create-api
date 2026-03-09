@@ -9,8 +9,7 @@
 #   pre-compiled node_modules to the runtime — keeping the final image slim.
 #
 # Volumes (defined at the bottom):
-#   /app/.apiary_cache  — Apiary blueprint cache (JSON/APIB files, 24h TTL)
-#   /app/.alegra_cache  — Alegra docs SQLite DB + index JSON (5-day TTL)
+#   /app/.apiary_cache  — Apiary blueprint cache (APIB files + blueprints.db RAG index, 24h TTL)
 #
 # Platform: linux/amd64 only (better-sqlite3 + apiaryio gem have native code;
 # amd64 builds work on Mac M-series via Docker Desktop / Rosetta 2).
@@ -54,7 +53,7 @@ FROM node:20-slim AS runtime
 
 # System runtime deps:
 #   ruby / ruby-dev + build-essential  → compile apiaryio gem
-#   ca-certificates                    → HTTPS fetches (developer.alegra.com)
+#   ca-certificates                    → HTTPS (Apiary API)
 #   curl                               → health checks / smoke tests
 # After gem install, build-essential + ruby-dev are purged to shrink the image.
 RUN apt-get update \
@@ -82,11 +81,9 @@ COPY --chown=appuser:appuser package.json package-lock.json ./
 COPY --from=builder --chown=appuser:appuser /app/build        ./build
 COPY --from=builder --chown=appuser:appuser /app/node_modules ./node_modules
 
-# Cache directories
-#   .apiary_cache  — Apiary blueprint files (text, JSON)
-#   .alegra_cache  — Alegra docs: index JSON + docs.db (SQLite with FTS5)
-RUN mkdir -p /app/.apiary_cache /app/.alegra_cache \
-  && chown -R appuser:appuser /app/.apiary_cache /app/.alegra_cache
+# Cache directory: Apiary blueprints + blueprints.db (RAG index)
+RUN mkdir -p /app/.apiary_cache \
+  && chown -R appuser:appuser /app/.apiary_cache
 
 ENV NODE_ENV=production
 
@@ -94,6 +91,6 @@ USER appuser
 
 # Expose cache dirs as volumes so data persists across container restarts
 # and can be mounted from the host or a named Docker volume.
-VOLUME ["/app/.apiary_cache", "/app/.alegra_cache"]
+VOLUME ["/app/.apiary_cache"]
 
 ENTRYPOINT ["node", "build/index.js"]

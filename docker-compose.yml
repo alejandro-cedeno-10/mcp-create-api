@@ -9,8 +9,7 @@
 #   docker compose down -v           # para + borra los volúmenes de cache
 #
 # Volúmenes persistentes:
-#   apiary_cache   → blueprints de Apiary (archivos .apib / JSON, TTL 24h)
-#   alegra_cache   → docs.db SQLite de Alegra (índice + secciones FTS5, TTL 5d)
+#   apiary_cache   → blueprints de Apiary (archivos .apib + blueprints.db RAG, TTL 24h)
 #
 # Variables de entorno:
 #   APIARY_API_KEY  → requerida para las tools de Apiary (get_apiary_blueprint, etc.)
@@ -47,14 +46,10 @@ services:
     # Volúmenes de cache
     # -------------------------------------------------------------------------
     volumes:
-      # Blueprints de Apiary — TTL 24h, ~1-50 MB por blueprint
+      # Blueprints de Apiary — TTL 24h, incluye índice RAG (blueprints.db)
       - apiary_cache:/app/.apiary_cache
 
-      # Alegra docs SQLite DB — TTL 5 días, ~5-20 MB
-      # Contiene: índice JSON de módulos/submodulos + docs.db con secciones FTS5
-      - alegra_cache:/app/.alegra_cache
-
-    # El MCP server usa stdio — no necesita puertos
+    # El MCP server usa stdio
     # stdin_open + tty permiten conectar al proceso stdio desde el host
     stdin_open: true
     tty: false
@@ -86,9 +81,4 @@ volumes:
   apiary_cache:
     driver: local
     labels:
-      com.apiary-mcp.description: "Apiary blueprint cache (TTL 24h)"
-
-  alegra_cache:
-    driver: local
-    labels:
-      com.apiary-mcp.description: "Alegra docs SQLite DB + index (TTL 5d)"
+      com.apiary-mcp.description: "Apiary blueprint cache + RAG index (TTL 24h)"

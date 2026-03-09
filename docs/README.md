@@ -1,227 +1,65 @@
-# Apiary MCP Server
+# Apiary MCP Server — Documentación técnica
 
-Servidor Model Context Protocol (MCP) que expone el CLI de Apiary y la API REST como herramientas nativas para agentes compatibles (p. ej. Cursor). Integra cache local con TTL de 24 horas y fallback offline para mantener la productividad cuando Apiary no está disponible. El servidor ofrece dos herramientas:
+## Herramientas (solo Apiary)
 
-## Requisitos
-
-- Node.js 20+
-- Apiary CLI disponible (incluido en la imagen Docker final) para `fetch`
-- API REST de Apiary para `list`
-- Clave de Apiary (`APIARY_API_KEY`)
-
-## Configuración local para desarrollo
-
-```bash
-cp .env.example .env
-edit .env
-
-npm install
-npm run build
-npm start
-```
-
-## Tests
-
-```bash
-npm test
-```
+- `list_apiary_apis` — Lista APIs de la cuenta.
+- `get_apiary_blueprint(apiName, forceRefresh?)` — Blueprint completo (cache 24h).
+- `get_apiary_blueprint_summary(apiName, includeExamples?)` — Resumen compacto (~90% menos tokens).
+- `search_apiary_blueprint(apiName, query?, maxSections?, forceRefresh?)` — RAG: búsqueda por keywords, devuelve solo secciones relevantes.
+- `generate_api_integration` / `generate_api_integration_plan` — Generación de código + tests.
 
 ---
 
-## Docker — Usar la imagen publicada (recomendado)
+## Prácticas aplicadas: Chunked RAG, Structure-Aware Chunking, BM25, Token Budget
 
-La imagen está disponible en GitHub Container Registry (GHCR). No necesitas clonar el repositorio ni hacer `build` local.
+Sí se aplican en el flujo de `search_apiary_blueprint`:
 
-### Tags disponibles
+| Práctica | Estado | Dónde |
+|----------|--------|--------|
+| **Chunked RAG** | ✅ Activo | El blueprint se sirve por chunks (secciones), no entero. |
+| **Structure-Aware Chunking** | ✅ Activo | `blueprintChunker.ts`: cortes por `#`/`##`/`###` (API Blueprint) o por path+method y schema (OpenAPI); merge de secciones &lt;80 chars; split por párrafos si &gt;2500 chars. Objetivo ~500 tokens/chunk. |
+| **BM25 Keyword Retrieval** | ✅ Activo | `apiaryBlueprintIndex.ts`: FTS5 con `MATCH` y `ORDER BY rank` (BM25 de SQLite). |
+| **Embeddings + búsqueda híbrida** | ✅ Activo | `embedder.ts`: modelo local **Xenova/all-MiniLM-L6-v2** (384 dims, sin API key). Tras indexar se calculan embeddings por sección en segundo plano; la búsqueda combina BM25 y similitud coseno con **RRF** (Reciprocal Rank Fusion). Si aún no hay embeddings, solo BM25. |
+| **Token Budget Management** | ✅ Activo | `estimateTokens()` (4 chars ≈ 1 token). Límite por secciones (`maxSections`) y **tope por tokens** en respuesta: `trimSectionsToTokenBudget(sections, 2000)` para no pasar ~2000 tokens al modelo. Header con `~N tokens`. |
+| **Lazy Indexing** | ✅ Activo | El índice se crea **on-demand**: al primer uso de `search_apiary_blueprint` para un `apiName` se hace fetch → chunk → load en SQLite. No hay jerarquía de niveles (eso era para docs con módulos/submódulos); aquí es un solo nivel: un blueprint → N secciones. |
 
-| Tag | Descripción |
-|---|---|
-| `latest` | Última versión estable publicada desde `main` |
-| `v2` | Major version 2 — incluye soporte de Alegra Docs |
-
-### Crear volúmenes de cache (solo la primera vez)
-
-```bash
-docker volume create apiary-cache
-docker volume create alegra-cache
-```
-
-### Correr con la imagen publicada
-
-```bash
-# Con la imagen v2 (recomendado para producción)
-docker run -i --rm \
-  -e APIARY_API_KEY="<TU_KEY>" \
-  -v "apiary-cache:/app/.apiary_cache" \
-  -v "alegra-cache:/app/.alegra_cache" \
-  ghcr.io/alejandro-cedeno-10/mcp-create-api:v2
-
-# Siempre la última versión
-docker run -i --rm \
-  -e APIARY_API_KEY="<TU_KEY>" \
-  -v "apiary-cache:/app/.apiary_cache" \
-  -v "alegra-cache:/app/.alegra_cache" \
-  ghcr.io/alejandro-cedeno-10/mcp-create-api:latest
-```
-
-### Configuración MCP (Cursor / Claude Desktop)
-
-Edita tu `mcp.json` con la imagen publicada:
-
-```json
-{
-  "mcpServers": {
-    "apiary": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "APIARY_API_KEY=${env:APIARY_API_KEY}",
-        "-v",
-        "apiary-cache:/app/.apiary_cache",
-        "-v",
-        "alegra-cache:/app/.alegra_cache",
-        "ghcr.io/alejandro-cedeno-10/mcp-create-api:v2"
-      ]
-    }
-  }
-}
-```
-
-> Cambia `v2` por `latest` si prefieres recibir actualizaciones automáticas sin cambiar el config.
+En conjunto: **Chunked RAG with Structure-Aware Chunking, BM25 Keyword Retrieval, and Token Budget Management**, con indexación lazy (un nivel por blueprint).
 
 ---
 
-## Docker — Build local (para desarrollo / contribución)
+## Cómo se guarda el RAG en la BD
 
-### Build
+Es un **ETL on-demand** (se ejecuta cuando hace falta), sin algoritmo de referencia externo:
 
-```bash
-docker build -t apiary-mcp-server:latest .
-```
+1. **E (Extract)**  
+   Se obtiene el blueprint en texto (desde cache en disco `.apiary_cache/<apiName>.apib` o desde el CLI de Apiary si no hay cache o `forceRefresh`).
 
-### Run local
+2. **T (Transform)**  
+   El texto **no se guarda plano**. Se aplica un algoritmo antes de insertar:
+   - **Chunking por estructura** en `blueprintChunker.ts`: cortes por `#`/`##`/`###` (API Blueprint) o por path+method y schema (OpenAPI); merge de secciones &lt;80 chars; split por párrafos si &gt;2500 chars (~500 tokens/chunk).
+   - **Normalización**: cada chunk se pasa por `normalizeContent()` (colapsar espacios/líneas en blanco, trim) para reducir ruido y tokens antes de guardar.
+   - **Límite de tokens al recuperar**: `trimSectionsToTokenBudget()` recorta la lista de secciones para no superar ~2000 tokens en la respuesta, porque los modelos leen por tokens.
 
-```bash
-docker run -i --rm \
-  -e APIARY_API_KEY="<TU_KEY>" \
-  -v "apiary-cache:/app/.apiary_cache" \
-  -v "alegra-cache:/app/.alegra_cache" \
-  apiary-mcp-server:latest
-```
+3. **L (Load)**  
+   En `apiaryBlueprintIndex.ts` se guarda en SQLite (`.apiary_cache/blueprints.db`):
+   - **Tabla `apiary_blueprints`:** una fila por API (`api_name`, `fetched_at`).
+   - **Tabla `apiary_blueprint_sections`:** una fila por chunk (`blueprint_id`, `title`, `content`, `position`).
+   - **Tabla virtual FTS5** `apiary_blueprint_sections_fts`: índice full-text sobre `title` y `content`, mantenido con triggers en INSERT/UPDATE/DELETE.
+   - **Tabla `apiary_blueprint_sections_emb`** (opcional): embeddings por sección (BLOB 384×4 bytes) con **Xenova/all-MiniLM-L6-v2** (`@xenova/transformers`). Se rellenan en **segundo plano** tras cada indexación para no bloquear la respuesta.
 
----
+4. **Recuperación**  
+   No se usa un “algoritmo de referencia” aparte para el texto: la búsqueda es **BM25** (FTS5).  
+   Si existen embeddings para ese blueprint, se hace **búsqueda híbrida**: BM25 (top 2×limit) + similitud coseno del embedding de la query con cada sección; se fusionan rankings con **RRF** (Reciprocal Rank Fusion) y se devuelven las top `limit` secciones.  
+   Con `query` y sin embeddings, solo BM25.  
+   Sin `query` se devuelven las primeras N secciones por `position`.  
+   El resultado son solo los chunks relevantes (p. ej. 3–5), no el blueprint entero.
 
-## Publicar una nueva versión (mantenedores)
-
-El flujo de CI/CD está en `.github/workflows/docker-publish.yml`.  
-Los tags de Docker se generan **automáticamente** desde los tags de Git.
-
-### Pasos para publicar v2.0.0
-
-```bash
-# 1. Asegúrate de estar en main con los cambios listos
-git checkout main
-git pull origin main
-
-# 2. Actualiza la versión en package.json (ya está en 2.0.0)
-
-# 3. Haz commit de todos los cambios pendientes
-git add .
-git commit -m "chore: release v2.0.0"
-
-# 4. Crea el tag de Git
-git tag v2.0.0
-
-# 5. Sube el commit y el tag (el tag dispara el workflow de publicación)
-git push origin main
-git push origin v2.0.0
-```
-
-Tras el push, GitHub Actions construirá y publicará automáticamente los siguientes tags en GHCR:
-
-### Verificar la imagen publicada
-
-```bash
-# Ver los tags disponibles en GHCR (requiere autenticación)
-docker pull ghcr.io/alejandro-cedeno-10/mcp-create-api:v2
-
-# Smoke test rápido
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}' \
-  | docker run -i --rm \
-      -e APIARY_API_KEY="test-key" \
-      ghcr.io/alejandro-cedeno-10/mcp-create-api:v2 \
-  | grep '"result"' && echo "OK"
-```
+**Resumen:** ETL on-demand (blueprint → chunk por estructura → INSERT en SQLite) + FTS5 (BM25). Opcionalmente embeddings locales (Xenova/all-MiniLM-L6-v2) en segundo plano para búsqueda híbrida BM25 + vector con RRF.
 
 ---
 
-## Arquitectura de recuperación de información (RAG)
+## Docker
 
-Este servidor implementa un conjunto de técnicas formales de recuperación de información para que el LLM reciba contexto real de la documentación en lugar de depender de su entrenamiento.
+Un solo volumen: `apiary-cache` → `/app/.apiary_cache` (archivos .apib + `blueprints.db`).
 
-### 1. RAG — Retrieval-Augmented Generation
-
-Patrón principal del servidor. El MCP tool actúa de retriever: el usuario pregunta → el tool busca en los docs → devuelve solo las secciones relevantes → el LLM responde con contexto real, sin alucinar.
-
-### 2. Structure-Aware Chunking (Chunked RAG)
-
-Los documentos se dividen en secciones por encabezados H2/H3, no por tamaño fijo de caracteres. Las secciones menores a 80 caracteres se fusionan con la anterior; las mayores a 2500 se parten en párrafos. Objetivo: ~500 tokens por chunk.
-
-### 3. BM25 — Best Match 25
-
-Algoritmo de ranking que SQLite FTS5 aplica automáticamente al ordenar por `rank`. Cada sección se puntúa por relevancia léxica frente a la query del usuario y se devuelven las top N.
-
-### 4. Hierarchical / Cascading Indexing
-
-Indexación en 4 niveles de granularidad progresiva (lazy evaluation): solo se profundiza al nivel siguiente cuando el usuario lo necesita.
-
-| Nivel | Contenido | Storage |
-|---|---|---|
-| 1 | Módulos | JSON, TTL 5 días |
-| 2 | Submódulos | mismo JSON, gratis |
-| 3 | Operaciones | SQLite, detectadas del sidebar |
-| 4 | Secciones FTS | SQLite `docs.db`, on-demand |
-
-### 5. Token Budget Management
-
-`estimateTokens()` calcula tokens aproximados (4 chars ≈ 1 token). Sin query se devuelven hasta 4 secciones; con query solo 3. El header de cada respuesta incluye el conteo para que el modelo sepa cuánto contexto recibió.
-
-### 6. Cache-aside Pattern con TTL
-
-| Cache | TTL |
-|---|---|
-| `alegra_docs_index.json` — índice de módulos | 5 días |
-| `docs.db` — secciones por página | 5 días |
-| `.apiary_cache/*.apib` — blueprints Apiary | 24 horas |
-
-Si el cache existe y el TTL es válido, no se hace ninguna llamada HTTP. Si expiró: fetch → chunk → store → responder.
-
-### 7. ETL on-demand
-
-Extract → Transform → Load disparado solo cuando el usuario solicita un endpoint no cacheado.
-
-| Fase | Implementación |
-|---|---|
-| Extract | `fetchEndpointPage()` → HTML crudo |
-| Transform | `htmlToReadable()` + `splitIntoSections()` |
-| Load | `storePage()` → SQLite FTS5 + vector table |
-
-A diferencia de herramientas como CocoIndex (batch + incremental), aquí el ETL es lazy: solo indexa lo que se consulta.
-
-### Estado de implementación
-
-| Técnica | Estado | Archivo |
-|---|---|---|
-| BM25 Keyword RAG | ✅ **Activo** | `alegraDatabase.ts` → `searchSections()` |
-| Structure-aware Chunking | ✅ **Activo** | `alegraChunker.ts` → `splitIntoSections()` |
-| Hierarchical Lazy Indexing | ✅ **Activo** | `alegraGetEndpointHandler.ts` (4 niveles) |
-| Token Budget Management | ✅ **Activo** | `alegraChunker.ts` → `estimateTokens()` |
-| Cache-aside con TTL | ✅ **Activo** | `cache.ts`, `alegraDocsCache.ts`, `alegraDatabase.ts` |
-| ETL on-demand | ✅ **Activo** | `alegraDocsScraper.ts` + `alegraChunker.ts` + `alegraDatabase.ts` |
-
-### Nombre formal del sistema
-
-> **Chunked RAG with Structure-Aware Chunking, Hierarchical Lazy Indexing, BM25 Keyword Retrieval, and Token Budget Management**
+Ver README en la raíz para crear el volumen y ejemplo de `mcp.json`.

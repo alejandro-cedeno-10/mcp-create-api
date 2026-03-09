@@ -28,12 +28,11 @@ import { detectSamplingSupport } from "./lib/samplingDetector.js";
 import {
   handleGetApiaryBlueprint,
   handleGetBlueprintSummary,
+  handleGetBlueprintOverview,
+  handleSearchApiaryBlueprint,
   handleListApiaryApis,
   handleGenerateApiIntegration,
   handleGenerateIntegrationPlan,
-  handleAlegraListModules,
-  handleAlegraListSubmodules,
-  handleAlegraGetEndpointDocs,
 } from "./handlers/index.js";
 
 import type { ApiaryToolClient, DocCacheAdapter } from "./types/index.js";
@@ -158,6 +157,12 @@ export function createApiaryToolHandlers(
         case TOOL_NAMES.GET_SUMMARY:
           return handleGetBlueprintSummary(rawArguments, client, cache);
 
+        case TOOL_NAMES.GET_OVERVIEW:
+          return handleGetBlueprintOverview(rawArguments, client, cache);
+
+        case TOOL_NAMES.SEARCH_BLUEPRINT:
+          return handleSearchApiaryBlueprint(rawArguments, client, cache);
+
         case TOOL_NAMES.LIST_APIS:
           return handleListApiaryApis(client);
 
@@ -172,15 +177,6 @@ export function createApiaryToolHandlers(
 
         case TOOL_NAMES.GENERATE_INTEGRATION_PLAN:
           return handleGenerateIntegrationPlan(rawArguments);
-
-        case TOOL_NAMES.ALEGRA_LIST_MODULES:
-          return handleAlegraListModules(rawArguments);
-
-        case TOOL_NAMES.ALEGRA_LIST_SUBMODULES:
-          return handleAlegraListSubmodules(rawArguments);
-
-        case TOOL_NAMES.ALEGRA_GET_ENDPOINT_DOCS:
-          return handleAlegraGetEndpointDocs(rawArguments);
 
         default:
           return createErrorResult(`Unhandled tool: "${name}"`);

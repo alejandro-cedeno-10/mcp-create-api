@@ -55,9 +55,7 @@ describe("createApiaryToolHandlers", () => {
     expect(names).toContain("get_apiary_blueprint_summary");
     expect(names).toContain("list_apiary_apis");
     expect(names).toContain("generate_api_integration_plan");
-    expect(names).toContain("alegra_list_modules");
-    expect(names).toContain("alegra_list_submodules");
-    expect(names).toContain("alegra_get_endpoint_docs");
+    expect(names).toContain("search_apiary_blueprint");
     expect(names).not.toContain("generate_api_integration"); // requires sampling
   });
 

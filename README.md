@@ -1,29 +1,22 @@
 # Apiary MCP Server
 
-Servidor Model Context Protocol (MCP) que expone el CLI de Apiary y la API REST como herramientas nativas para agentes compatibles (Cursor, Claude Desktop, OpenCode…). Integra cache local con TTL de 24 horas y fallback offline para mantener la productividad cuando Apiary no está disponible.
+Servidor Model Context Protocol (MCP) que expone el CLI de Apiary y la API REST como herramientas nativas para agentes compatibles (Cursor, Claude Desktop, OpenCode…). Incluye cache local con TTL de 24 horas, índice RAG con chunking por estructura (OpenAPI/API Blueprint), búsqueda BM25 + embeddings opcionales y control de tokens. Fallback offline cuando Apiary no está disponible.
 
 ## Herramientas disponibles
 
 | Tool | Descripción | Requiere |
-|---|---|---|
-| `list_apiary_apis()` | Lista todos los APIs disponibles en la cuenta de Apiary. | `APIARY_API_KEY` |
-| `get_apiary_blueprint_summary(apiName, includeExamples?)` | Resumen compacto del API: endpoints, modelos y estadísticas. ⚡ ~90% menos tokens que el blueprint completo. Ideal para exploración inicial. | `APIARY_API_KEY` |
-| `get_apiary_blueprint(apiName, forceRefresh?)` | Especificación completa (API Blueprint / Swagger / OpenAPI). Usa cache local con TTL 24h; `forceRefresh: true` omite el cache. ⚠️ Puede superar 50k tokens. | `APIARY_API_KEY` |
-| `search_apiary_blueprint(apiName, query?, maxSections?)` | **RAG:** Busca en el blueprint por palabras clave y devuelve solo las secciones relevantes (3–5 chunks). Ahorra tokens vs. cargar el blueprint completo. | `APIARY_API_KEY` |
+|------|-------------|----------|
+| `list_apiary_apis()` | Lista todos los APIs disponibles en la cuenta de Apiary (nombres y subdominios). | `APIARY_API_KEY` |
+| `get_apiary_blueprint(apiName, forceRefresh?)` | Especificación completa (API Blueprint / Swagger / OpenAPI). Cache local TTL 24h; `forceRefresh: true` omite el cache. ⚠️ Puede superar 50k tokens. | `APIARY_API_KEY` |
+| `get_apiary_blueprint_summary(apiName, includeExamples?)` | Resumen compacto: endpoints por método, modelos y estadísticas. ⚡ ~90% menos tokens que el blueprint completo. Ideal para exploración inicial. | `APIARY_API_KEY` |
+| `get_apiary_blueprint_overview(apiName, maxSections?, maxTokens?, forceRefresh?)` | Resumen desde el **índice**: reutiliza las secciones ya chunkeadas (y opcionalmente embebidas). Sin re-parsear el spec; control con `maxSections` (1–20, default 10) y `maxTokens` (400–4000, default 2000). Usar después de traer el blueprint o de buscar. | `APIARY_API_KEY` |
+| `search_apiary_blueprint(apiName, query?, maxSections?, forceRefresh?)` | **RAG:** búsqueda por palabras clave; devuelve solo las secciones relevantes (structure-aware chunking, BM25/FTS5, opcional híbrido con embeddings y RRF). `maxSections` 1–15 (default 5). Recorte por presupuesto de tokens. | `APIARY_API_KEY` |
 | `generate_api_integration_plan(apiName, language, useCase, testFramework?)` | Genera un plan JSON paso a paso que el LLM del IDE ejecuta para producir código de integración + tests unitarios. Funciona en todos los clientes MCP. | `APIARY_API_KEY` |
-| `generate_api_integration(apiName, language, useCase, testFramework?)` | Genera directamente código de integración listo para producción + tests unitarios usando MCP sampling (hereda el LLM del IDE, sin API key extra). Soporta cualquier lenguaje (TypeScript, Python, Java, Go, C#…). | `APIARY_API_KEY` + cliente MCP con sampling |
+| `generate_api_integration(apiName, language, useCase, testFramework?)` | Genera directamente código de integración + tests unitarios usando MCP sampling (hereda el LLM del IDE, sin API key extra). Soporta varios lenguajes (TypeScript, Python, Java, Go, C#, etc.). | `APIARY_API_KEY` + cliente MCP con sampling |
 
-**Documentación genérica (cualquier sitio):** Registra un sitio por URL base y consulta por secciones, con indexación lazy y búsqueda FTS para ahorrar tokens.
+El servidor crea `.apiary_cache/` (blueprints + índice RAG en SQLite) en el directorio del proyecto; puedes borrarlo para reiniciar la caché.
 
-| Tool | Descripción |
-|---|---|
-| `docs_register_source(baseUrl, name?)` | Registra un sitio de documentación por su URL base. Obtiene el índice de páginas (__NEXT_DATA__ o enlaces same-origin). |
-| `docs_list_pages(sourceId, forceRefresh?)` | Lista las páginas/secciones del sitio registrado. Usa el `path` devuelto en `docs_get_page`. |
-| `docs_get_page(sourceId, pagePathOrUrl, query?, maxSections?)` | Obtiene una página: la descarga, trocea por H2/H3, indexa en SQLite FTS5 y devuelve solo las secciones relevantes (o búsqueda por `query`). Indexación lazy (solo lo que se pide). TTL 5 días. |
-
-La carga de variables `.env` es automática en tiempo de ejecución (gracias a `dotenv`). El servidor crea `.apiary_cache/` (blueprints + índice RAG) y `.docs_cache/` (docs genéricas) en el directorio del proyecto; puedes borrarlos cuando quieras reiniciar la caché.
-
-El servidor dialoga por STDIO y normalmente se ejecuta como subproceso de la herramienta MCP.
+El servidor dialoga por STDIO y se ejecuta como subproceso del cliente MCP.
 
 ## Docker
 
@@ -56,7 +49,7 @@ docker run -i --rm \
 
 ---
 
-## Integración del mcp
+## Integración del MCP
 
 ### Edita tu archivo `mcp.json`:
 
@@ -80,16 +73,19 @@ docker run -i --rm \
 }
 ```
 
-
-### Reinicia completamente.
+Reinicia por completo el cliente MCP después de cambiar la configuración.
 
 ## Prácticas de ingeniería aplicadas
 
 | Práctica | Descripción |
-|---|---|
-| **Tool Caching (TTL 24 h)** | Los blueprints se guardan en disco y se reutilizan durante 24 h. Evita llamadas repetidas a Apiary y permite trabajar offline. |
-| **MCP Sampling** | El servidor no necesita una API key de LLM propia. Envía `sampling/createMessage` al cliente y este responde con su modelo. SOLO para clientes MCP que implementen sampling/createMessage. |
-| **Prompt Chaining** | El flujo de generación es un agente de 3 pasos secuenciales: (1) cargar el blueprint, (2) generar el código, (3) generar los tests usando el código del paso anterior como contexto. El output de cada paso es el input del siguiente. |
-| **MCP Prompts (templates)** | Dos prompts MCP formales registrados en el servidor — `generate_integration_code` y `generate_integration_tests` — con system prompt, user prompt y placeholders tipados. El llm del IDE puede invocarlos directamente sin sampling. |
-| **Graceful Degradation (3 niveles)** | Si sampling falla, el servidor intenta un segundo camino; si vuelve a fallar, devuelve el plan JSON para que el llm del IDE ejecute él mismo. Ningún cliente se queda sin respuesta. |
-| **Token Optimization** | El resumen compacto del blueprint extrae solo lo relevante (~90% menos tokens). **RAG sobre blueprints:** `search_apiary_blueprint` indexa el spec por secciones (chunking por endpoints/schemas) y devuelve solo los chunks relevantes a la query (BM25/FTS5), reduciendo drásticamente tokens. |
+|----------|-------------|
+| **Cache de blueprints (TTL 24 h)** | Los blueprints se guardan en disco y se reutilizan 24 h. Menos llamadas a Apiary y uso offline con fallback a cache expirado si falla la red. |
+| **Chunked RAG con structure-aware chunking** | El blueprint se trocea por secciones lógicas: en OpenAPI por path+method y por schema en `components/schemas`; en API Blueprint por `#`, `##`, `###`. Solo `search_apiary_blueprint` usa este índice para recuperación. |
+| **Indexación lazy** | El índice (chunks + FTS5 + embeddings opcionales) se crea la primera vez que se busca o se pide overview para ese API; no se pre-indexan todos los blueprints. |
+| **BM25 (FTS5) + búsqueda híbrida** | Búsqueda por palabras clave con SQLite FTS5. Si existen embeddings (Xenova/all-MiniLM-L6-v2, en background), se combina BM25 y similitud vectorial con RRF (Reciprocal Rank Fusion). |
+| **Token budget management** | Límites configurables: `maxSections`, `maxTokens` en search y overview; recorte de secciones para no exceder el presupuesto de tokens devuelto al modelo. |
+| **Overview desde índice** | `get_apiary_blueprint_overview` reutiliza las mismas secciones indexadas (chunked/embedded) que la búsqueda, para dar un resumen sin volver a parsear el spec completo. |
+| **Prompt chaining** | Flujo de generación en 3 pasos: (1) cargar blueprint, (2) generar código, (3) generar tests con el código como contexto. La salida de cada paso es la entrada del siguiente. |
+| **MCP Sampling** | El servidor no usa API key de LLM propia: envía `sampling/createMessage` al cliente, que responde con su modelo. Solo en clientes que implementen sampling. |
+| **MCP Prompts (templates)** | Prompts registrados: `generate_integration_code` y `generate_integration_tests`, con system/user y placeholders. El LLM del IDE puede invocarlos sin sampling. |
+| **Graceful degradation** | Si sampling no está disponible, se puede ejecutar el plan vía sampling con plantillas; si tampoco, se devuelve el plan JSON para que el IDE lo ejecute paso a paso. |

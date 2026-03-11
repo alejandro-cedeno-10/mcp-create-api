@@ -2,13 +2,8 @@ name: Build & Publish Docker Image
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
-  pull_request:
-    branches:
-      - main
 
 env:
   REGISTRY: ghcr.io
@@ -38,10 +33,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Tags generados automaticamente:
-      #   push a main      -> :latest
-      #   push tag v1.2.3  -> :1.2.3  :1.2  :latest
-      #   PR               -> :pr-42  (solo build local, sin push)
+      # Tags generados: push tag v1.2.3 -> :1.2.3 :1.2 :v1 :latest
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5

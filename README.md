@@ -11,10 +11,9 @@ Servidor Model Context Protocol (MCP) que expone el CLI de Apiary y la API REST 
 | `get_apiary_blueprint(apiName, forceRefresh?)` | Especificación completa (API Blueprint / Swagger / OpenAPI). Usa cache local con TTL 24h; `forceRefresh: true` omite el cache. ⚠️ Puede superar 50k tokens. | `APIARY_API_KEY` |
 | `generate_api_integration_plan(apiName, language, useCase, testFramework?)` | Genera un plan JSON paso a paso que el LLM del IDE ejecuta para producir código de integración + tests unitarios. Funciona en todos los clientes MCP. | `APIARY_API_KEY` |
 | `generate_api_integration(apiName, language, useCase, testFramework?)` | Genera directamente código de integración listo para producción + tests unitarios usando MCP sampling (hereda el LLM del IDE, sin API key extra). Soporta cualquier lenguaje (TypeScript, Python, Java, Go, C#…). | `APIARY_API_KEY` + cliente MCP con sampling |
-
-Tambien se puede usar el tool `alegra_list_modules()` para listar los modulos de Alegra Docs publica.
-Tambien se puede usar el tool `alegra_list_submodules(moduleName)` para listar los submodulos de un modulo de Alegra Docs publica.
-Tambien se puede usar el tool `alegra_get_endpoint_docs(moduleName, submoduleName, operationName)` para obtener la documentacion de un endpoint de Alegra Docs publica.
+| `alegra_list_modules()` | Lista los módulos disponibles en Alegra Docs pública. | — |
+| `alegra_list_submodules(moduleName)` | Lista los submódulos de un módulo de Alegra Docs pública. | — |
+| `alegra_get_endpoint_docs(moduleName, submoduleName, operationName)` | Obtiene la documentación de un endpoint de Alegra Docs pública. | — |
 
 La carga de variables `.env` es automática en tiempo de ejecución (gracias a `dotenv`). El servidor crea `.apiary_cache/` en el directorio del proyecto para guardar los contratos y reutilizarlos durante 24h; puedes borrar la carpeta cuando quieras reiniciar el cache.
 
